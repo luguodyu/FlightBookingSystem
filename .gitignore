@@ -1,0 +1,21 @@
+# IDE 配置
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# 测试和覆盖率
+.coverag
+.coverage
+htmlcov/
+.pytest_cache/
+
+# 数据库配置（含敏感信息）
+dbnavigator.xml
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 环境变量文件
+.env
