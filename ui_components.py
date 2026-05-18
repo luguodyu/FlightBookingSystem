@@ -6,8 +6,12 @@ from db_operations import DBOperator
 
 class LoginWindow:
 
-    def __init__(self):
-        self.db = DBOperator()
+    def __init__(self, booking_service, flight_service, user_service, db):
+        # 接收服务层对象而不是直接创建 db
+        self.booking_service = booking_service
+        self.flight_service = flight_service
+        self.user_service = user_service
+        self.db = db  # 保留 db 用于管理员功能，后续也可以改为服务层
         self.current_user = None
 
         self.root = tk.Tk()
@@ -41,20 +45,20 @@ class LoginWindow:
             messagebox.showwarning("提示", "请输入用户名和密码")
             return
 
-        user = self.db.login(username, password)
-        if user:
+        success, user = self.user_service.login(username, password)
+        if success:
             self.current_user = user
             self.root.destroy()
 
             if user['user_type'] == 'admin':
-                AdminWindow(self.db, user)
+                AdminWindow(self.db, user)  # 管理员暂时保持原样
             else:
-                PassengerWindow(self.db, user)
+                PassengerWindow(self.booking_service, self.flight_service, user, self.db)
         else:
             messagebox.showerror("登录失败", "用户名或密码错误")
 
     def open_register(self):
-        RegisterDialog(self.root, self.db)
+        RegisterDialog(self.root, self.user_service)
 
     def run(self):
         self.root.mainloop()
@@ -63,8 +67,10 @@ class LoginWindow:
 
 class PassengerWindow:
 
-    def __init__(self, db, user):
-        self.db = db
+    def __init__(self, booking_service, flight_service, user, db):
+        self.booking_service = booking_service
+        self.flight_service = flight_service
+        self.db = db  # 保留用于部分功能
         self.user = user
 
         self.root = tk.Tk()
@@ -168,36 +174,26 @@ class PassengerWindow:
         class_type = values[5]
 
         try:
-            flight_query = """
-            SELECT flight_id FROM Flight 
-            WHERE flight_no = %s AND DATE(departure_time) = %s
-            """
+            # 1. 根据航班号和日期获取航班ID
             departure_date = departure_time_str[:10]
+            flight = self.flight_service._flight_repo.get_flight_by_no_and_date(flight_no, departure_date)
 
-            flight_result = self.db.execute_query(flight_query, (flight_no, departure_date))
-
-            if not flight_result:
+            if not flight:
                 messagebox.showerror("错误", "无法找到对应的航班")
                 return
 
-            flight_id = flight_result[0]['flight_id']
+            flight_id = flight[0]['flight_id']
 
-            seat_query = """
-            SELECT seat_class_id FROM SeatClass 
-            WHERE flight_id = %s AND class_type = %s
-            """
-            seat_result = self.db.execute_query(seat_query, (flight_id, class_type))
+            # 2. 使用服务层预订
 
-            if not seat_result:
-                messagebox.showerror("错误", f"无法找到{class_type}舱位")
-                return
+            success, msg = self.booking_service.book_ticket(
+                self.user['user_id'], flight_id, class_type
+            )
 
-            seat_class_id = seat_result[0]['seat_class_id']
-
-            success, msg = self.db.book_ticket(self.user['user_id'], flight_id, seat_class_id)
             if success:
                 messagebox.showinfo("成功", msg)
-                self.load_orders()
+                self.load_orders()  # 刷新订单列表
+                self.search_flights()  # 刷新航班列表（更新余票）
             else:
                 messagebox.showerror("失败", msg)
 
@@ -719,12 +715,11 @@ class AdminWindow:
 
 class RegisterDialog:
 
-    def __init__(self, parent, db):
-        self.db = db
+    def __init__(self, parent, user_service):
+        self.user_service = user_service  # 注入服务层
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("用户注册")
         self.dialog.geometry("350x300")
-
         self.create_widgets()
 
     def create_widgets(self):
@@ -758,17 +753,10 @@ class RegisterDialog:
         real_name = self.entries["真实姓名:"].get()
         phone = self.entries["手机号:"].get()
 
-        if not username or not password:
-            messagebox.showwarning("提示", "用户名和密码不能为空")
-            return
-
-        if password != confirm:
-            messagebox.showwarning("提示", "两次输入的密码不一致")
-            return
-
-        result = self.db.register(username, password, real_name, phone)
-        if result:
-            messagebox.showinfo("成功", "注册成功，请登录")
+        # 使用 UserService 进行注册
+        success, msg = self.user_service.register(username, password, confirm, real_name, phone)
+        if success:
+            messagebox.showinfo("成功", msg)
             self.dialog.destroy()
         else:
-            messagebox.showerror("失败", "注册失败，用户名可能已存在")
+            messagebox.showerror("失败", msg)
