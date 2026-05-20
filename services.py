@@ -2,6 +2,8 @@ from typing import List, Dict, Tuple, Optional
 from interfaces import (
     IFlightRepository, IOrderRepository, ISeatClassRepository, IUserRepository
 )
+import hashlib
+import json
 
 
 class BookingService:
@@ -53,12 +55,31 @@ class BookingService:
 class FlightQueryService:
     """航班查询服务"""
 
-    def __init__(self, flight_repo: IFlightRepository):
+    def __init__(self, flight_repo, use_cache=True):
         self._flight_repo = flight_repo
+        self._use_cache = use_cache
+        self._cache = {}
+        self._cache_hits = 0
+        self._cache_misses = 0
 
-    def search_flights(self, departure: str = None, arrival: str = None, date: str = None) -> List[Dict]:
-        """查询航班，支持按出发地、目的地、日期过滤"""
-        return self._flight_repo.get_available_flights(departure, arrival, date)
+    def _get_cache_key(self, departure, arrival, date):
+        key_dict = {'departure': departure, 'arrival': arrival, 'date': date}
+        return hashlib.md5(json.dumps(key_dict, sort_keys=True).encode()).hexdigest()
+
+    def search_flights(self, departure=None, arrival=None, date=None):
+        if not self._use_cache:
+            return self._flight_repo.get_available_flights(departure, arrival, date)
+
+        cache_key = self._get_cache_key(departure, arrival, date)
+
+        if cache_key in self._cache:
+            self._cache_hits += 1
+            return self._cache[cache_key]
+
+        self._cache_misses += 1
+        result = self._flight_repo.get_available_flights(departure, arrival, date)
+        self._cache[cache_key] = result
+        return result
 
     def get_flight_detail(self, flight_id: int) -> Optional[Dict]:
         """获取航班详情"""
